@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__browsermcp__browser_screenshot",
+      "mcp__browsermcp__browser_snapshot",
+      "Bash(mkdir:*)",
+      "Bash(npx create-react-app:*)",
+      "Bash(npx vite:*)",
+      "Bash(rm:*)",
+      "Bash(npm install)",
+      "Bash(node:*)",
+      "Bash(timeout 10 npm start)",
+      "Bash(uv init:*)",
+      "Bash(uv add:*)",
+      "Bash(uv run:*)",
+      "Bash(timeout 5 uv run:*)",
+      "Bash(mv:*)",
+      "mcp__browsermcp__browser_navigate",
+      "mcp__browsermcp__browser_press_key",
+      "mcp__browsermcp__browser_get_console_logs",
+      "mcp__browsermcp__browser_wait",
+      "Bash(pkill:*)",
+      "Bash(taskkill:*)",
+      "Bash(python:*)",
+      "Bash(copy:*)",
+      "Bash(cp:*)"
+    ],
+    "deny": []
+  }
+}
