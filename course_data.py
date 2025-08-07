@@ -3,12 +3,22 @@ import string
 from datetime import datetime
 from collections import defaultdict
 import re
+import pickle
+import os
+from pathlib import Path
 
 class CourseDataProcessor:
     def __init__(self, xlsx_file_path):
-        self.df = pd.read_excel(xlsx_file_path)
-        self.df.columns = self.df.columns.str.strip()  # 清理列名
+        self.xlsx_file_path = xlsx_file_path
+        self.df = None
         self.processed_courses = None
+        self.cache_file = Path(xlsx_file_path).with_suffix('.cache')
+        
+        # 尝试从缓存加载，如果缓存不存在或过期则重新加载
+        if self._should_reload_cache():
+            self._load_and_process_data()
+        else:
+            self._load_from_cache()
         
     def get_semester_from_section(self, section):
         """从CLASS SECTION确定学期"""
@@ -22,8 +32,59 @@ class CourseDataProcessor:
         else:
             return 'Other'
     
+    def _should_reload_cache(self):
+        """检查是否需要重新加载缓存"""
+        if not self.cache_file.exists():
+            return True
+        
+        # 检查Excel文件是否比缓存文件新
+        xlsx_mtime = os.path.getmtime(self.xlsx_file_path)
+        cache_mtime = os.path.getmtime(self.cache_file)
+        return xlsx_mtime > cache_mtime
+    
+    def _load_from_cache(self):
+        """从缓存文件加载数据"""
+        try:
+            with open(self.cache_file, 'rb') as f:
+                cache_data = pickle.load(f)
+                self.processed_courses = cache_data['processed_courses']
+                print(f"从缓存加载数据: {self.cache_file}")
+        except Exception as e:
+            print(f"缓存加载失败: {e}, 重新处理数据")
+            self._load_and_process_data()
+    
+    def _save_to_cache(self):
+        """保存数据到缓存文件"""
+        try:
+            cache_data = {
+                'processed_courses': self.processed_courses,
+                'timestamp': datetime.now()
+            }
+            with open(self.cache_file, 'wb') as f:
+                pickle.dump(cache_data, f)
+            print(f"数据已缓存到: {self.cache_file}")
+        except Exception as e:
+            print(f"缓存保存失败: {e}")
+    
+    def _load_and_process_data(self):
+        """加载Excel文件并处理数据"""
+        print(f"加载Excel文件: {self.xlsx_file_path}")
+        self.df = pd.read_excel(self.xlsx_file_path)
+        
+        # 清理列名，移除前后空格
+        self.df.columns = self.df.columns.str.strip()
+        print(f"处理后的列名: {list(self.df.columns)}")
+        
+        # 立即处理数据
+        self.process_courses()
+        
+        # 保存到缓存
+        self._save_to_cache()
+    
     def process_courses(self):
         """处理课程数据，按CLASS NUMBER正确分组subclass和time slots"""
+        print("开始处理课程数据...")
+        
         courses_by_semester = {
             'Sem1': {},
             'Sem2': {},
@@ -31,27 +92,28 @@ class CourseDataProcessor:
             'Other': {}
         }
         
-        # 按课程代码分组
-        for course_code in self.df['COURSE CODE'].unique():
-            if pd.isna(course_code):
-                continue
-                
-            course_data = self.df[self.df['COURSE CODE'] == course_code].copy()
-            course_info = course_data.iloc[0]  # 获取课程基本信息
+        # 预处理：添加学期列以提高性能
+        self.df['SEMESTER'] = self.df['CLASS SECTION'].apply(self.get_semester_from_section)
+        
+        # 过滤掉无效的课程代码
+        valid_df = self.df.dropna(subset=['COURSE CODE']).copy()
+        
+        # 按课程代码分组处理
+        for course_code, course_group in valid_df.groupby('COURSE CODE'):
+            course_info = course_group.iloc[0]  # 获取课程基本信息
             
-            # 按学期分组处理
-            entries_by_semester = defaultdict(list)
-            
-            for _, row in course_data.iterrows():
-                semester = self.get_semester_from_section(row['CLASS SECTION'])
+            # 按学期分组处理 - 使用groupby提高性能
+            for semester, semester_group in course_group.groupby('SEMESTER'):
+                entries = []
                 
-                # 获取上课日期
-                days = []
-                for day in ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']:
-                    if pd.notna(row[day]):
-                        days.append(day)
-                
-                if days:  # 只有有上课日期的entry才加入
+                for _, row in semester_group.iterrows():
+                    # 获取上课日期
+                    days = []
+                    for day in ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']:
+                        if pd.notna(row[day]):
+                            days.append(day)
+                    
+                    # 保留所有entries，包括没有上课日期的（可能是在线课程或特殊课程）
                     entry = {
                         'section': str(row['CLASS SECTION']) if pd.notna(row['CLASS SECTION']) else '',
                         'days': days,
@@ -61,10 +123,8 @@ class CourseDataProcessor:
                         'instructor': str(row['INSTRUCTOR']) if pd.notna(row['INSTRUCTOR']) else '',
                         'class_number': str(row['CLASS NUMBER']) if pd.notna(row['CLASS NUMBER']) else ''
                     }
-                    entries_by_semester[semester].append(entry)
-            
-            # 为每个学期的课程创建subclass
-            for semester, entries in entries_by_semester.items():
+                    entries.append(entry)
+                
                 if entries:  # 只有有entries的学期才创建课程
                     subclasses = {}
                     
@@ -82,16 +142,23 @@ class CourseDataProcessor:
                         first_entry = class_entries[0]
                         subclass_label = first_entry['section']
                         
-                        # 创建time slots列表
+                        # 创建time slots列表，去除重复的星期几
                         time_slots = []
+                        processed_day_combinations = set()
+                        
                         for entry in class_entries:
-                            time_slots.append({
-                                'days': entry['days'],
-                                'start_time': entry['start_time'],
-                                'end_time': entry['end_time'],
-                                'venue': entry['venue'],
-                                'instructor': entry['instructor']
-                            })
+                            # 将days列表转换为排序后的元组，用作去重的key
+                            day_tuple = tuple(sorted(entry['days']))
+                            
+                            if day_tuple not in processed_day_combinations:
+                                processed_day_combinations.add(day_tuple)
+                                time_slots.append({
+                                    'days': entry['days'],
+                                    'start_time': entry['start_time'],
+                                    'end_time': entry['end_time'],
+                                    'venue': entry['venue'],
+                                    'instructor': entry['instructor']
+                                })
                         
                         subclasses[subclass_label] = {
                             'label': subclass_label,
@@ -112,12 +179,21 @@ class CourseDataProcessor:
                     }
         
         self.processed_courses = courses_by_semester
+        
+        # 打印处理统计信息
+        total_courses = sum(len(courses) for courses in courses_by_semester.values())
+        print(f"课程处理完成: 共 {total_courses} 门课程")
+        for semester, courses in courses_by_semester.items():
+            if courses:
+                print(f"  {semester}: {len(courses)} 门课程")
+        
         return courses_by_semester
     
     def get_courses_by_semester(self, semester):
         """获取特定学期的课程"""
         if not self.processed_courses:
-            self.process_courses()
+            # 如果数据还未处理，但这种情况在新的实现中不应该发生
+            raise RuntimeError("课程数据未正确初始化")
         return self.processed_courses.get(semester, {})
     
     def search_courses(self, query='', department='', semester='Sem1'):
@@ -162,7 +238,7 @@ class CourseDataProcessor:
     def get_available_semesters(self):
         """获取所有可用的学期"""
         if not self.processed_courses:
-            self.process_courses()
+            raise RuntimeError("课程数据未正确初始化")
         
         available = []
         for semester, courses in self.processed_courses.items():

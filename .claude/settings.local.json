@@ -23,7 +23,8 @@
       "Bash(taskkill:*)",
       "Bash(python:*)",
       "Bash(copy:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(timeout:*)"
     ],
     "deny": []
   }
