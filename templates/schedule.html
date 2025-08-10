@@ -191,26 +191,14 @@ $(document).ready(function() {
         const overlayContainer = $('#course-overlay');
         overlayContainer.empty();
         
-        // Create course color mapping to ensure uniqueness
-        const courseColorMap = new Map();
-        const uniqueCourses = [];
-        
-        // Get unique course list
-        currentSchedule.forEach(function(item) {
-            const courseKey = `${item.course_code}_${item.subclass}`;
-            if (!courseColorMap.has(courseKey)) {
-                courseColorMap.set(courseKey, uniqueCourses.length);
-                uniqueCourses.push(courseKey);
-            }
-        });
-        
         // Create absolutely positioned blocks for each course
         currentSchedule.forEach(function(item, index) {
             const course = courseDetails[item.course_code];
             if (course && course.subclasses[item.subclass]) {
                 const subclass = course.subclasses[item.subclass];
-                const courseKey = `${item.course_code}_${item.subclass}`;
-                const colorIndex = courseColorMap.get(courseKey);
+                
+                // Generate stable color index based on course code hash
+                const colorIndex = getStableColorIndex(item.course_code);
                 
                 subclass.time_slots.forEach(function(timeSlot) {
                     timeSlot.days.forEach(function(day) {
@@ -287,7 +275,7 @@ $(document).ready(function() {
             // Basic time configuration: 9:00-22:00, one cell per hour
             const baseTimeMinutes = 9 * 60; // 9:00 AM in minutes
             
-            // Get table position and size
+            // Get table position and size with precise measurements
             const headerHeight = table.find('thead').outerHeight() || 40;
             const firstDataRow = table.find('tbody tr:first');
             const firstTimeCell = firstDataRow.find(`td.time-cell:eq(${dayIndex})`);
@@ -297,35 +285,44 @@ $(document).ready(function() {
                 return null;
             }
             
-            const timeRowHeight = firstDataRow.outerHeight() || 80; // Use actual row height
-            const columnWidth = firstTimeCell.outerWidth() || 120;
+            // Get precise measurements
+            const timeRowHeight = firstDataRow.outerHeight() || 80;
             const timeColumnWidth = table.find('thead th:first').outerWidth() || 80;
+            
+            // Get the exact position of the target cell
+            const targetCell = firstTimeCell[0];
+            const cellRect = targetCell.getBoundingClientRect();
+            const tableRect = table[0].getBoundingClientRect();
+            
+            // Calculate precise left position relative to table
+            const left = cellRect.left - tableRect.left + 2; // 2px padding from cell border
+            
+            // Calculate precise width to match cell width
+            const width = cellRect.width - 4; // 4px total padding (2px each side)
             
             // Calculate course start and end minute offsets relative to 9:00
             const startOffset = startTimeMinutes - baseTimeMinutes;
             const endOffset = endTimeMinutes - baseTimeMinutes;
             
-            // Calculate precise position (by minute ratio)
-            const left = timeColumnWidth + (dayIndex * columnWidth) + 4;
-            const top = headerHeight + (startOffset / 60) * timeRowHeight + 4;
+            // Calculate precise top position (by minute ratio)
+            const top = headerHeight + (startOffset / 60) * timeRowHeight + 2; // 2px padding from cell top
             
             // Calculate height (by actual time duration ratio)
             const duration = endTimeMinutes - startTimeMinutes;
-            const height = (duration / 60) * timeRowHeight - 8;
-            const width = columnWidth - 8;
+            const height = Math.max((duration / 60) * timeRowHeight - 4, 20); // 4px total padding, minimum 20px height
             
-            console.log(`Proportional course position: 
+            console.log(`Precise course position: 
                 dayIndex=${dayIndex}, 
                 startTime=${Math.floor(startTimeMinutes/60)}:${String(startTimeMinutes%60).padStart(2,'0')}, 
                 endTime=${Math.floor(endTimeMinutes/60)}:${String(endTimeMinutes%60).padStart(2,'0')},
                 left=${left}, top=${top}, width=${width}, height=${height},
-                duration=${duration}min`);
+                duration=${duration}min, cellWidth=${cellRect.width}`);
             
             return { 
                 left: Math.round(left), 
                 top: Math.round(top), 
                 width: Math.max(Math.round(width), 50), 
-                height: Math.max(Math.round(height), 20) 
+                height: Math.round(height)
             };
         } catch (error) {
             console.error('Error calculating proportional position:', error);
@@ -352,41 +349,55 @@ $(document).ready(function() {
     }
 
 
-    // Removed conflict checking function - conflicts are now prevented at selection time
+    // Generate stable color index based on course code hash
+    function getStableColorIndex(courseCode) {
+        // Simple hash function for consistent color assignment
+        let hash = 0;
+        for (let i = 0; i < courseCode.length; i++) {
+            const char = courseCode.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        
+        // Ensure positive index within color range
+        const colors = getAvailableColors();
+        return Math.abs(hash) % colors.length;
+    }
 
     function getCourseColor(courseCode) {
-        // 基于课程代码生成颜色
-        const colors = [
-            '#007bff', '#28a745', '#dc3545', '#ffc107', 
-            '#17a2b8', '#6f42c1', '#fd7e14', '#20c997'
-        ];
-        const index = courseCode.charCodeAt(0) % colors.length;
-        return colors[index];
+        // 基于课程代码生成颜色 - 保持向后兼容
+        const colorIndex = getStableColorIndex(courseCode);
+        return getCourseColorByIndex(colorIndex);
     }
     
     function getAvailableColors() {
-        // 扩展颜色调色板，移除红色（专用于冲突）
+        // 扩展颜色调色板，确保足够多的不同颜色用于课程区分
         return [
-            'rgba(0, 123, 255, 0.85)',    // 蓝色
-            'rgba(40, 167, 69, 0.85)',    // 绿色
-            'rgba(255, 193, 7, 0.85)',    // 黄色
-            'rgba(23, 162, 184, 0.85)',   // 青色
-            'rgba(111, 66, 193, 0.85)',   // 紫色
-            'rgba(253, 126, 20, 0.85)',   // 橙色
-            'rgba(32, 201, 151, 0.85)',   // 翠绿色
-            'rgba(108, 117, 125, 0.85)',  // 灰色
-            'rgba(255, 20, 147, 0.85)',   // 深粉色
-            'rgba(75, 0, 130, 0.85)',     // 靛蓝
-            'rgba(255, 165, 0, 0.85)',    // 橘色
-            'rgba(128, 0, 128, 0.85)',    // 紫色2
-            'rgba(0, 191, 255, 0.85)',    // 深天蓝
-            'rgba(50, 205, 50, 0.85)',    // 酸橙绿
-            'rgba(255, 69, 0, 0.85)',     // 橙红色
-            'rgba(72, 61, 139, 0.85)',    // 深蓝紫
-            'rgba(47, 79, 79, 0.85)',     // 深石板灰
-            'rgba(184, 134, 11, 0.85)',   // 深金色
-            'rgba(153, 50, 204, 0.85)',   // 深兰花紫
-            'rgba(0, 100, 0, 0.85)'       // 深绿色
+            'rgba(0, 123, 255, 0.85)',    // 蓝色 - 经典蓝
+            'rgba(40, 167, 69, 0.85)',    // 绿色 - 成功绿
+            'rgba(255, 193, 7, 0.85)',    // 黄色 - 警告黄
+            'rgba(111, 66, 193, 0.85)',   // 紫色 - 深紫
+            'rgba(253, 126, 20, 0.85)',   // 橙色 - 活力橙
+            'rgba(23, 162, 184, 0.85)',   // 青色 - 信息青
+            'rgba(32, 201, 151, 0.85)',   // 翠绿色 - 清新绿
+            'rgba(255, 20, 147, 0.85)',   // 深粉色 - 热情粉
+            'rgba(75, 0, 130, 0.85)',     // 靛蓝 - 深靛蓝
+            'rgba(255, 165, 0, 0.85)',    // 橘色 - 温暖橘
+            'rgba(128, 0, 128, 0.85)',    // 紫色2 - 经典紫
+            'rgba(0, 191, 255, 0.85)',    // 深天蓝 - 天空蓝
+            'rgba(50, 205, 50, 0.85)',    // 酸橙绿 - 柠檬绿
+            'rgba(255, 69, 0, 0.85)',     // 橙红色 - 火焰橙
+            'rgba(72, 61, 139, 0.85)',    // 深蓝紫 - 暗蓝紫
+            'rgba(184, 134, 11, 0.85)',   // 深金色 - 古铜金
+            'rgba(153, 50, 204, 0.85)',   // 深兰花紫 - 兰花紫
+            'rgba(0, 100, 0, 0.85)',      // 深绿色 - 森林绿
+            'rgba(220, 20, 60, 0.85)',    // 深红色 - 胭脂红
+            'rgba(30, 144, 255, 0.85)',   // 道奇蓝 - 闪电蓝
+            'rgba(255, 140, 0, 0.85)',    // 暗橙色 - 日落橙
+            'rgba(148, 0, 211, 0.85)',    // 暗紫色 - 神秘紫
+            'rgba(34, 139, 34, 0.85)',    // 森林绿 - 自然绿
+            'rgba(199, 21, 133, 0.85)',   // 中等紫红色 - 玫瑰紫
+            'rgba(25, 25, 112, 0.85)',    // 午夜蓝 - 深夜蓝
         ];
     }
     
@@ -396,10 +407,9 @@ $(document).ready(function() {
     }
     
     function getCourseColorRGBA(courseCode) {
-        // 保留旧函数以防其他地方使用
-        const colors = getAvailableColors();
-        const index = courseCode.charCodeAt(0) % colors.length;
-        return colors[index];
+        // 使用新的稳定颜色分配算法
+        const colorIndex = getStableColorIndex(courseCode);
+        return getCourseColorByIndex(colorIndex);
     }
 
     function showCourseDetail(courseCode, subclassLabel = null) {

@@ -142,17 +142,18 @@
             position: absolute;
             background-color: rgba(0, 123, 255, 0.85);
             color: white;
-            border-radius: 6px;
+            border-radius: 4px;
             font-size: 0.75em;
             text-align: left;
-            padding: 6px 8px;
+            padding: 4px 6px;
             cursor: pointer;
             transition: all 0.2s ease;
-            border: 2px solid rgba(255,255,255,0.3);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.4);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
             pointer-events: all;
             z-index: 10;
             overflow: hidden;
+            box-sizing: border-box;
         }
         
         .course-block-overlay:hover {
@@ -181,9 +182,26 @@
         
         .schedule-grid-table td {
             height: 80px;
-            min-width: 100px;
+            min-width: 120px;
             border: 1px solid #dee2e6;
             vertical-align: top;
+            padding: 0;
+            position: relative;
+        }
+        
+        .schedule-grid-table td.time-cell {
+            width: 120px;
+        }
+        
+        .schedule-grid-table th {
+            text-align: center;
+            padding: 8px 4px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .schedule-grid-table th:first-child {
+            width: 80px;
+            min-width: 80px;
         }
     </style>
 </head>
