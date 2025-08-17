@@ -3,6 +3,7 @@ from course_data import CourseDataProcessor
 import os
 from datetime import datetime, timedelta
 import re
+import pytz
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
@@ -178,13 +179,26 @@ def api_export_ics():
 def generate_ics_calendar(schedule, semester):
     """生成ICS日历内容"""
     
-    # ICS header
+    # Define Hong Kong timezone
+    hk_tz = pytz.timezone('Asia/Hong_Kong')
+    
+    # ICS header with timezone definition
     ics_lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
         'PRODID:-//Course Planner//Course Schedule//EN',
         'CALSCALE:GREGORIAN',
-        'METHOD:PUBLISH'
+        'METHOD:PUBLISH',
+        'X-WR-TIMEZONE:Asia/Hong_Kong',
+        'BEGIN:VTIMEZONE',
+        'TZID:Asia/Hong_Kong',
+        'BEGIN:STANDARD',
+        'DTSTART:19700101T000000',
+        'TZOFFSETFROM:+0800',
+        'TZOFFSETTO:+0800',
+        'TZNAME:HKT',
+        'END:STANDARD',
+        'END:VTIMEZONE'
     ]
     
     # Get semester dates (approximation - you may want to adjust these)
@@ -206,7 +220,7 @@ def generate_ics_calendar(schedule, semester):
         for time_slot in subclass['time_slots']:
             for day in time_slot['days']:
                 events = create_recurring_events(
-                    course, time_slot, day, semester_dates, course_code, subclass_label
+                    course, time_slot, day, semester_dates, course_code, subclass_label, hk_tz
                 )
                 ics_lines.extend(events)
     
@@ -238,7 +252,7 @@ def get_semester_dates(semester):
     
     return start_date, end_date
 
-def create_recurring_events(course, time_slot, day, semester_dates, course_code, subclass_label):
+def create_recurring_events(course, time_slot, day, semester_dates, course_code, subclass_label, hk_tz):
     """为特定日期创建重复事件"""
     start_date, end_date = semester_dates
     
@@ -276,31 +290,37 @@ def create_recurring_events(course, time_slot, day, semester_dates, course_code,
     except ValueError:
         return []
     
-    # Create the event
-    event_start = datetime.combine(current.date(), start_time)
-    event_end = datetime.combine(current.date(), end_time)
+    # Create the event with Hong Kong timezone
+    event_start = hk_tz.localize(datetime.combine(current.date(), start_time))
+    event_end = hk_tz.localize(datetime.combine(current.date(), end_time))
     
-    # Format dates for ICS (UTC format)
-    def format_datetime(dt):
+    # Localize end date for RRULE
+    end_datetime = hk_tz.localize(datetime.combine(end_date.date(), datetime.max.time()))
+    
+    # Format dates for ICS with timezone
+    def format_datetime_tz(dt):
         return dt.strftime('%Y%m%dT%H%M%S')
     
     # Generate unique UID
-    uid = f"{course_code}-{subclass_label}-{day}-{format_datetime(event_start)}"
+    uid = f"{course_code}-{subclass_label}-{day}-{format_datetime_tz(event_start)}"
     
     # Create RRULE for weekly recurrence until end of semester
-    rrule = f"FREQ=WEEKLY;UNTIL={end_date.strftime('%Y%m%dT235959Z')}"
+    rrule = f"FREQ=WEEKLY;UNTIL={end_datetime.strftime('%Y%m%dT%H%M%S')}"
+    
+    # Get current time in HK timezone for created/modified fields
+    now_hk = datetime.now(hk_tz)
     
     event_lines = [
         'BEGIN:VEVENT',
         f'UID:{uid}@course-planner.local',
-        f'DTSTART:{format_datetime(event_start)}',
-        f'DTEND:{format_datetime(event_end)}',
+        f'DTSTART;TZID=Asia/Hong_Kong:{format_datetime_tz(event_start)}',
+        f'DTEND;TZID=Asia/Hong_Kong:{format_datetime_tz(event_end)}',
         f'RRULE:{rrule}',
         f'SUMMARY:{course_code} - {course["title"]}',
         f'DESCRIPTION:Course: {course_code}\\nClass: {subclass_label}\\nInstructor: {time_slot["instructor"]}',
         f'LOCATION:{time_slot["venue"]}',
-        f'CREATED:{datetime.now().strftime("%Y%m%dT%H%M%SZ")}',
-        f'LAST-MODIFIED:{datetime.now().strftime("%Y%m%dT%H%M%SZ")}',
+        f'CREATED:{now_hk.strftime("%Y%m%dT%H%M%S")}',
+        f'LAST-MODIFIED:{now_hk.strftime("%Y%m%dT%H%M%S")}',
         'END:VEVENT'
     ]
     
